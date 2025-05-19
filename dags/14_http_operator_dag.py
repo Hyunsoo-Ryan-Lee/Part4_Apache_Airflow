@@ -3,6 +3,7 @@ import pandas as pd
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.providers.http.operators.http import HttpOperator
+from airflow.hooks.http_hook import HttpHook
 
 
 default_args = dict(
@@ -12,12 +13,29 @@ default_args = dict(
     retries=3
 )
 
-def fetch_data(**kwargs):
+http_hook = HttpHook(http_conn_id='brewery_api', method='GET')
+
+def fetch_with_httphook():
+    response = http_hook.run()
+
+    print(pd.json_normalize(response.json()).head())
+    return response.json()
+
+
+def fetch_with_httpoperator(**kwargs):
     ti = kwargs.get('ti')
     
     json_data = ti.xcom_pull(key='return_value')
     
-    # dataframe으로 변경
+    """
+    [{}, {}, {}, ....]
+    
+    XCOM 거치면
+    
+    '[{}, {}, {}, ....]'
+    """
+    
+    # dataframe으로 변경   -> 
     data = json.loads(json_data)
     
     df = pd.json_normalize(data)
@@ -48,10 +66,15 @@ with DAG(
     )
     
     ## 가져온 JSON 데이터를 Dataframe으로 변경 후 GCS에 저장하는 함수
-    get_data = PythonOperator(
-        task_id='get_data',
-        python_callable=fetch_data
+    get_operator_data = PythonOperator(
+        task_id='get_operator_data',
+        python_callable=fetch_with_httpoperator
+    )
+
+    get_hook_data = PythonOperator(
+        task_id='get_hook_data',
+        python_callable=fetch_with_httphook
     )
     
     
-get_http >> get_data
+get_http >> get_operator_data >> get_hook_data
